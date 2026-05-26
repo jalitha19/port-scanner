@@ -1,11 +1,10 @@
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
 
 open_ports = []
 lock = threading.Lock()
 
-# Common port to service name mapping
-# This is a manual fallback for when banner grabbing doesn't work
 COMMON_SERVICES = {
     21:   "FTP",
     22:   "SSH",
@@ -28,31 +27,18 @@ COMMON_SERVICES = {
 }
 
 def grab_banner(host, port, timeout=1):
-    """
-    After connecting, wait briefly to see if the service
-    sends us an intro message (the banner).
-    Some services need a nudge (we send a newline first).
-    """
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
         sock.connect((host, port))
-
-        # Some services (like HTTP) need you to say something first
         sock.send(b"HEAD / HTTP/1.0\r\n\r\n")
-
         banner = sock.recv(1024).decode("utf-8", errors="ignore").strip()
         sock.close()
         return banner if banner else None
-
     except Exception:
         return None
 
 def scan_port(host, port, timeout=0.5):
-    """
-    Check if port is open. If yes, attempt banner grab
-    and look up service name.
-    """
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
@@ -74,21 +60,20 @@ def scan_port(host, port, timeout=0.5):
         pass
 
 def main():
-    host = "127.0.0.1"
-    ports = range(1, 1025)
-    threads = []
+    host       = "127.0.0.1"
+    start_port = 1
+    end_port   = 1024
+    max_workers = 100        # max threads running at the same time
 
-    print(f"\nScanning {host} ...\n")
+    print(f"\nScanning {host} (ports {start_port}-{end_port}) with {max_workers} threads...\n")
 
-    for port in ports:
-        t = threading.Thread(target=scan_port, args=(host, port))
-        threads.append(t)
-        t.start()
+    # ThreadPoolExecutor manages the thread pool for you
+    # It queues up all the scan_port calls and runs max_workers at a time
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for port in range(start_port, end_port + 1):
+            executor.submit(scan_port, host, port)
+    # When the 'with' block ends, it automatically waits for all threads to finish
 
-    for t in threads:
-        t.join()
-
-    # Sort by port number
     open_ports.sort(key=lambda x: x["port"])
 
     print(f"{'PORT':<8} {'SERVICE':<16} {'BANNER'}")
