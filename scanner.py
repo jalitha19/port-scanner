@@ -1,5 +1,7 @@
 import socket
 import threading
+import argparse
+import datetime
 from concurrent.futures import ThreadPoolExecutor
 
 open_ports = []
@@ -59,31 +61,64 @@ def scan_port(host, port, timeout=0.5):
     except socket.error:
         pass
 
+def build_report(host, start_port, end_port, duration):
+    """
+    Builds the scan report as a string.
+    Used for both printing to screen and saving to file.
+    """
+    lines = []
+    lines.append("=" * 60)
+    lines.append("  PORT SCANNER REPORT")
+    lines.append("=" * 60)
+    lines.append(f"  Target  : {host}")
+    lines.append(f"  Range   : {start_port} - {end_port}")
+    lines.append(f"  Time    : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    lines.append(f"  Duration: {duration:.2f} seconds")
+    lines.append(f"  Open    : {len(open_ports)} port(s)")
+    lines.append("")
+    lines.append(f"  {'PORT':<8} {'SERVICE':<16} {'BANNER'}")
+    lines.append("  " + "-" * 56)
+
+    for entry in open_ports:
+        banner_preview = entry["banner"][:38] if entry["banner"] else "—"
+        lines.append(f"  {entry['port']:<8} {entry['service']:<16} {banner_preview}")
+
+    lines.append("=" * 60)
+    return "\n".join(lines)
+
 def main():
-    host       = "127.0.0.1"
-    start_port = 1
-    end_port   = 1024
-    max_workers = 100        # max threads running at the same time
+    # argparse sets up the command-line interface
+    parser = argparse.ArgumentParser(
+        description="Python TCP Port Scanner with Banner Grabbing"
+    )
+    parser.add_argument("host",                          help="Target IP or hostname (e.g. 127.0.0.1)")
+    parser.add_argument("--start",   type=int, default=1,    help="Start port (default: 1)")
+    parser.add_argument("--end",     type=int, default=1024, help="End port (default: 1024)")
+    parser.add_argument("--threads", type=int, default=100,  help="Max threads (default: 100)")
+    parser.add_argument("--output",  type=str, default=None, help="Save report to this file (optional)")
+    args = parser.parse_args()
 
-    print(f"\nScanning {host} (ports {start_port}-{end_port}) with {max_workers} threads...\n")
+    print(f"\nScanning {args.host} (ports {args.start}-{args.end}) ...\n")
 
-    # ThreadPoolExecutor manages the thread pool for you
-    # It queues up all the scan_port calls and runs max_workers at a time
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for port in range(start_port, end_port + 1):
-            executor.submit(scan_port, host, port)
-    # When the 'with' block ends, it automatically waits for all threads to finish
+    start_time = datetime.datetime.now()
+
+    with ThreadPoolExecutor(max_workers=args.threads) as executor:
+        for port in range(args.start, args.end + 1):
+            executor.submit(scan_port, args.host, port)
+
+    end_time = datetime.datetime.now()
+    duration = (end_time - start_time).total_seconds()
 
     open_ports.sort(key=lambda x: x["port"])
 
-    print(f"{'PORT':<8} {'SERVICE':<16} {'BANNER'}")
-    print("-" * 60)
+    report = build_report(args.host, args.start, args.end, duration)
+    print(report)
 
-    for entry in open_ports:
-        banner_preview = entry["banner"][:40] if entry["banner"] else "—"
-        print(f"  {entry['port']:<6} {entry['service']:<16} {banner_preview}")
-
-    print(f"\nDone. {len(open_ports)} open port(s) found.")
+    # Save to file if --output was provided
+    if args.output:
+        with open(args.output, "w") as f:
+            f.write(report)
+        print(f"\n  Report saved to: {args.output}")
 
 if __name__ == "__main__":
     main()
